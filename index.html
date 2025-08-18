@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Food Delivery Order Management</title>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <style>
+        :root {
+            --primary: #ff6b6b;
+            --secondary: #4ecdc4;
+            --dark: #292f36;
+            --light: #f7fff7;
+            --accent: #ff9f1c;
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            background-color: #f5f5f5;
+            color: var(--dark);
+            line-height: 1.6;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+            color: var(--primary);
+        }
+        
+        .input-section {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 30px;
+        }
+        
+        textarea {
+            width: 100%;
+            min-height: 150px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            resize: vertical;
+            margin-bottom: 15px;
+            font-size: 16px;
+        }
+        
+        button {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+        
+        button:hover {
+            background-color: #ff5252;
+        }
+        
+        .orders-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+        }
+        
+        .order-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            position: relative;
+        }
+        
+        .order-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .order-number {
+            background-color: var(--accent);
+            color: white;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+        
+        .customer-info {
+            margin-bottom: 15px;
+        }
+        
+        .customer-name {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .contact-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .contact-btn {
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .call-btn {
+            background-color: #4CAF50;
+        }
+        
+        .whatsapp-btn {
+            background-color: #25D366;
+        }
+        
+        .order-items {
+            margin: 15px 0;
+        }
+        
+        .order-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            padding-bottom: 8px;
+            border-bottom: 1px dashed #eee;
+        }
+        
+        .order-summary {
+            margin-top: 15px;
+            padding-top: 10px;
+            border-top: 1px solid #eee;
+        }
+        
+        .summary-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+        }
+        
+        .total-row {
+            font-weight: bold;
+            font-size: 18px;
+            color: var(--primary);
+        }
+        
+        .order-footer {
+            margin-top: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-top: 10px;
+            border-top: 1px solid #eee;
+        }
+        
+        .order-time {
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .action-buttons {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .timer-btn {
+            background-color: var(--secondary);
+        }
+        
+        .map-btn {
+            background-color: var(--dark);
+        }
+        
+        .timer {
+            font-weight: bold;
+            color: var(--primary);
+        }
+        
+        .status-badge {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background-color: var(--accent);
+            color: white;
+            padding: 3px 8px;
+            border-radius: 5px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Food Delivery Order Management</h1>
+        
+        <div class="input-section">
+            <h2>New Order</h2>
+            <textarea id="orderInput" placeholder="Paste order message here..."></textarea>
+            <button id="generateBtn">Generate Card</button>
+        </div>
+        
+        <div class="orders-container" id="ordersContainer">
+            <!-- Orders will be displayed here -->
+        </div>
+    </div>
+
+    <script>
+        // Firebase configuration and initialization
+        const firebaseConfig = {
+            apiKey: "AIzaSyA1irPLEM3r7u7V_ym3VA5ynWlYWl0C-JM",
+            authDomain: "foodu-94983.firebaseapp.com",
+            projectId: "foodu-94983",
+            storageBucket: "foodu-94983.appspot.com",
+            messagingSenderId: "872411238136",
+            appId: "1:872411238136:web:93b4568609ecc5bf99b50d"
+        };
+
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
+        // DOM elements
+        const orderInput = document.getElementById('orderInput');
+        const generateBtn = document.getElementById('generateBtn');
+        const ordersContainer = document.getElementById('ordersContainer');
+
+        // Global order counter
+        let orderCounter = 0;
+
+        // Parse order message
+        function parseOrderMessage(message) {
+            const order = {
+                name: extractValue(message, 'Name:'),
+                mobile: extractValue(message, 'Mobile:'),
+                items: extractItems(message),
+                subtotal: extractValue(message, 'Subtotal:'),
+                deliveryCharge: extractValue(message, 'Delivery Charge:'),
+                grandTotal: extractValue(message, 'Grand Total:'),
+                location: extractValue(message, 'Location:'),
+                time: extractValue(message, 'Time:'),
+                status: 'pending',
+                timerActive: false,
+                timerEnd: null
+            };
+            return order;
+        }
+
+        function extractValue(text, key) {
+            const regex = new RegExp(`${key}\\s*(.*)`);
+            const match = text.match(regex);
+            return match ? match[1].split('\n')[0].trim() : '';
+        }
+
+        function extractItems(text) {
+            const itemsSection = text.match(/Items:\n([\s\S]*?)Total Items:/);
+            if (!itemsSection) return [];
+            
+            const itemsText = itemsSection[1];
+            const itemLines = itemsText.split('\n').filter(line => line.trim().startsWith('-'));
+            
+            return itemLines.map(line => {
+                const match = line.match(/-\s*(.*?)\s*\(₹(.*?)\s*per.*?\)\s*x(\d+)\s*=\s*₹(.*)/);
+                if (match) {
+                    return {
+                        name: match[1].trim(),
+                        price: match[2].trim(),
+                        quantity: match[3].trim(),
+                        total: match[4].trim()
+                    };
+                }
+                return null;
+            }).filter(item => item !== null);
+        }
+
+        // Create order card
+        function createOrderCard(order, orderNumber) {
+            const card = document.createElement('div');
+            card.className = 'order-card';
+            
+            // Format time
+            const formattedTime = order.time ? order.time.replace(',', ' at') : '';
+            
+            // Status badge
+            const statusBadge = document.createElement('div');
+            statusBadge.className = 'status-badge';
+            statusBadge.textContent = order.status;
+            card.appendChild(statusBadge);
+            
+            // Order header with number
+            const orderHeader = document.createElement('div');
+            orderHeader.className = 'order-header';
+            
+            const orderNum = document.createElement('div');
+            orderNum.className = 'order-number';
+            orderNum.textContent = orderNumber;
+            orderHeader.appendChild(orderNum);
+            
+            const orderTitle = document.createElement('h3');
+            orderTitle.textContent = `Order #${orderNumber}`;
+            orderHeader.appendChild(orderTitle);
+            
+            card.appendChild(orderHeader);
+            
+            // Customer info
+            const customerInfo = document.createElement('div');
+            customerInfo.className = 'customer-info';
+            
+            const customerName = document.createElement('div');
+            customerName.className = 'customer-name';
+            customerName.textContent = order.name;
+            customerInfo.appendChild(customerName);
+            
+            const customerPhone = document.createElement('div');
+            customerPhone.textContent = `Phone: ${order.mobile}`;
+            customerInfo.appendChild(customerPhone);
+            
+            // Contact buttons
+            const contactButtons = document.createElement('div');
+            contactButtons.className = 'contact-buttons';
+            
+            const callBtn = document.createElement('button');
+            callBtn.className = 'contact-btn call-btn';
+            callBtn.innerHTML = '📞 Call';
+            callBtn.onclick = () => window.open(`tel:${order.mobile}`, '_blank');
+            contactButtons.appendChild(callBtn);
+            
+            const whatsappBtn = document.createElement('button');
+            whatsappBtn.className = 'contact-btn whatsapp-btn';
+            whatsappBtn.innerHTML = '💬 WhatsApp';
+            whatsappBtn.onclick = () => window.open(`https://wa.me/91${order.mobile}?text=Hi ${order.name}, this is regarding your food order #${orderNumber}`, '_blank');
+            contactButtons.appendChild(whatsappBtn);
+            
+            customerInfo.appendChild(contactButtons);
+            card.appendChild(customerInfo);
+            
+            // Order items
+            const orderItems = document.createElement('div');
+            orderItems.className = 'order-items';
+            
+            order.items.forEach(item => {
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'order-item';
+                
+                const itemName = document.createElement('div');
+                itemName.textContent = `${item.name} x${item.quantity}`;
+                itemDiv.appendChild(itemName);
+                
+                const itemPrice = document.createElement('div');
+                itemPrice.textContent = `₹${item.total}`;
+                itemDiv.appendChild(itemPrice);
+                
+                orderItems.appendChild(itemDiv);
+            });
+            
+            card.appendChild(orderItems);
+            
+            // Order summary
+            const orderSummary = document.createElement('div');
+            orderSummary.className = 'order-summary';
+            
+            const subtotalRow = document.createElement('div');
+            subtotalRow.className = 'summary-row';
+            subtotalRow.innerHTML = '<div>Subtotal:</div><div>₹' + order.subtotal + '</div>';
+            orderSummary.appendChild(subtotalRow);
+            
+            const deliveryRow = document.createElement('div');
+            deliveryRow.className = 'summary-row';
+            deliveryRow.innerHTML = '<div>Delivery Charge:</div><div>₹' + order.deliveryCharge + '</div>';
+            orderSummary.appendChild(deliveryRow);
+            
+            const totalRow = document.createElement('div');
+            totalRow.className = 'summary-row total-row';
+            totalRow.innerHTML = '<div>Total:</div><div>₹' + order.grandTotal + '</div>';
+            orderSummary.appendChild(totalRow);
+            
+            card.appendChild(orderSummary);
+            
+            // Order footer
+            const orderFooter = document.createElement('div');
+            orderFooter.className = 'order-footer';
+            
+            const orderTime = document.createElement('div');
+            orderTime.className = 'order-time';
+            orderTime.textContent = formattedTime;
+            orderFooter.appendChild(orderTime);
+            
+            const actionButtons = document.createElement('div');
+            actionButtons.className = 'action-buttons';
+            
+            const timerBtn = document.createElement('button');
+            timerBtn.className = 'timer-btn';
+            timerBtn.textContent = 'Start 25-min Timer';
+            timerBtn.onclick = () => startTimer(card, order, orderNumber);
+            actionButtons.appendChild(timerBtn);
+            
+            const mapBtn = document.createElement('button');
+            mapBtn.className = 'map-btn';
+            mapBtn.textContent = 'Start Ride';
+            mapBtn.onclick = () => window.open(`https://www.google.com/maps?q=${order.location}`, '_blank');
+            actionButtons.appendChild(mapBtn);
+            
+            orderFooter.appendChild(actionButtons);
+            card.appendChild(orderFooter);
+            
+            // Add timer display if timer is active
+            if (order.timerActive && order.timerEnd) {
+                const timerDisplay = document.createElement('div');
+                timerDisplay.className = 'timer';
+                timerDisplay.id = `timer-${orderNumber}`;
+                card.querySelector('.action-buttons').prepend(timerDisplay);
+                updateTimerDisplay(orderNumber, order.timerEnd);
+            }
+            
+            return card;
+        }
+
+        // Timer functions
+        function startTimer(card, order, orderNumber) {
+            const now = new Date();
+            const endTime = new Date(now.getTime() + 25 * 60000); // 25 minutes from now
+            
+            // Update order in Firestore
+            db.collection('orders').doc(`order-${orderNumber}`).update({
+                timerActive: true,
+                timerEnd: endTime.toISOString()
+            });
+            
+            // Create timer display if it doesn't exist
+            let timerDisplay = card.querySelector('.timer');
+            if (!timerDisplay) {
+                timerDisplay = document.createElement('div');
+                timerDisplay.className = 'timer';
+                timerDisplay.id = `timer-${orderNumber}`;
+                card.querySelector('.action-buttons').prepend(timerDisplay);
+            }
+            
+            // Disable timer button
+            const timerBtn = card.querySelector('.timer-btn');
+            timerBtn.disabled = true;
+            timerBtn.textContent = 'Timer Running';
+            
+            // Start updating the display
+            updateTimerDisplay(orderNumber, endTime);
+        }
+
+        function updateTimerDisplay(orderNumber, endTime) {
+            const timerDisplay = document.getElementById(`timer-${orderNumber}`);
+            if (!timerDisplay) return;
+            
+            const now = new Date();
+            const end = new Date(endTime);
+            const diff = end - now;
+            
+            if (diff <= 0) {
+                timerDisplay.textContent = 'Time expired!';
+                return;
+            }
+            
+            const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+            
+            timerDisplay.textContent = `${Math.floor(minutes)}:${seconds < 10 ? '0' : ''}${seconds}`;
+            
+            setTimeout(() => updateTimerDisplay(orderNumber, endTime), 1000);
+        }
+
+        // Save order to Firestore
+        function saveOrderToFirestore(order, orderNumber) {
+            return db.collection('orders').doc(`order-${orderNumber}`).set({
+                ...order,
+                orderNumber
+            });
+        }
+
+        // Load orders from Firestore
+        function loadOrdersFromFirestore() {
+            ordersContainer.innerHTML = '';
+            
+            db.collection('orders').orderBy('time', 'desc').get().then((querySnapshot) => {
+                querySnapshot.forEach((doc) => {
+                    const orderData = doc.data();
+                    const orderNumber = orderData.orderNumber;
+                    
+                    // Update global counter if needed
+                    if (orderNumber > orderCounter) {
+                        orderCounter = orderNumber;
+                    }
+                    
+                    const card = createOrderCard(orderData, orderNumber);
+                    ordersContainer.appendChild(card);
+                });
+            });
+        }
+
+        // Event listeners
+        generateBtn.addEventListener('click', () => {
+            const message = orderInput.value.trim();
+            if (!message) return;
+            
+            orderCounter++;
+            const order = parseOrderMessage(message);
+            
+            saveOrderToFirestore(order, orderCounter).then(() => {
+                const card = createOrderCard(order, orderCounter);
+                ordersContainer.prepend(card);
+                orderInput.value = '';
+            }).catch(error => {
+                console.error('Error saving order:', error);
+            });
+        });
+
+        // Initialize the app
+        document.addEventListener('DOMContentLoaded', () => {
+            loadOrdersFromFirestore();
+        });
+    </script>
+</body>
+</html>
