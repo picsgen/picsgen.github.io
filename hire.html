@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Majra Bites – Hire Delivery Boys</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 25px;
+            border-radius: 10px;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.1);
+        }
+        
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+            margin-bottom: 30px;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+        
+        input[type="text"],
+        input[type="number"],
+        textarea,
+        select {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+        
+        textarea {
+            height: 100px;
+            resize: vertical;
+        }
+        
+        .checkbox-group {
+            margin: 15px 0;
+        }
+        
+        .checkbox-item {
+            margin-bottom: 10px;
+        }
+        
+        .checkbox-item input {
+            margin-right: 10px;
+        }
+        
+        .submit-btn {
+            background-color: #27ae60;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            width: 100%;
+            font-weight: bold;
+            transition: background-color 0.3s;
+        }
+        
+        .submit-btn:hover {
+            background-color: #2ecc71;
+        }
+        
+        .note {
+            font-weight: bold;
+            text-align: center;
+            margin: 20px 0;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+        }
+        
+        .success-message {
+            display: none;
+            text-align: center;
+            color: #27ae60;
+            font-weight: bold;
+            margin-top: 20px;
+            font-size: 18px;
+        }
+        
+        @media (max-width: 480px) {
+            .container {
+                padding: 15px;
+            }
+            
+            h1 {
+                font-size: 24px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Majra Bites – Hire Delivery Boys</h1>
+        
+        <form id="deliveryForm">
+            <div class="form-group">
+                <label for="name">Enter Your Name</label>
+                <input type="text" id="name" name="name" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="mobile">Enter Mobile Number</label>
+                <input type="number" id="mobile" name="mobile" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="age">Enter Your Age</label>
+                <input type="number" id="age" name="age" required>
+            </div>
+            
+            <div class="checkbox-group">
+                <label>Checkbox Options (tick to agree):</label>
+                <div class="checkbox-item">
+                    <input type="checkbox" id="hasBike" name="hasBike">
+                    <label for="hasBike">Yes, I have a Bike/Scooty (2-wheeler)</label>
+                </div>
+                <div class="checkbox-item">
+                    <input type="checkbox" id="hasDevice" name="hasDevice">
+                    <label for="hasDevice">Yes, I have a 4G/5G device available all the time</label>
+                </div>
+                <div class="checkbox-item">
+                    <input type="checkbox" id="canWork" name="canWork">
+                    <label for="canWork">Yes, I can work 8 hours daily (active work)</label>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label for="vehicleCompany">Enter Your 2-Wheeler Company Name</label>
+                <input type="text" id="vehicleCompany" name="vehicleCompany">
+            </div>
+            
+            <div class="form-group">
+                <label for="mobileCompany">Enter Your Mobile Company Name</label>
+                <input type="text" id="mobileCompany" name="mobileCompany">
+            </div>
+            
+            <div class="form-group">
+                <label for="questions">Any Questions Related to Us?</label>
+                <textarea id="questions" name="questions"></textarea>
+            </div>
+            
+            <div class="note">
+                For salary details, we will call you. Please pick the call. 👍
+            </div>
+            
+            <button type="submit" class="submit-btn">Submit Application</button>
+        </form>
+        
+        <div id="successMessage" class="success-message">
+            ✅ Your application has been submitted successfully!
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('deliveryForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            // Get form values
+            const name = document.getElementById('name').value;
+            const mobile = document.getElementById('mobile').value;
+            const age = document.getElementById('age').value;
+            const hasBike = document.getElementById('hasBike').checked ? 'Yes' : 'No';
+            const hasDevice = document.getElementById('hasDevice').checked ? 'Yes' : 'No';
+            const canWork = document.getElementById('canWork').checked ? 'Yes' : 'No';
+            const vehicleCompany = document.getElementById('vehicleCompany').value;
+            const mobileCompany = document.getElementById('mobileCompany').value;
+            const questions = document.getElementById('questions').value;
+            
+            // Prepare message for Telegram
+            const message = `New Delivery Boy Application:\n\n` +
+                           `Name: ${name}\n` +
+                           `Mobile: ${mobile}\n` +
+                           `Age: ${age}\n` +
+                           `Has Bike/Scooty: ${hasBike}\n` +
+                           `Has 4G/5G Device: ${hasDevice}\n` +
+                           `Can work 8 hours: ${canWork}\n` +
+                           `2-Wheeler Company: ${vehicleCompany}\n` +
+                           `Mobile Company: ${mobileCompany}\n` +
+                           `Questions: ${questions}`;
+            
+            // Send to Telegram bot
+            const botToken = '8311976506:AAHCMdrwWzHbKYPVxItoiRXFg0hvppS_26c';
+            const chatId = '5165964724';
+            const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+            
+            fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    chat_id: chatId,
+                    text: message
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Show success message
+                document.getElementById('successMessage').style.display = 'block';
+                document.getElementById('deliveryForm').reset();
+                
+                // Scroll to success message
+                document.getElementById('successMessage').scrollIntoView({
+                    behavior: 'smooth'
+                });
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('There was an error submitting your application. Please try again.');
+            });
+        });
+    </script>
+</body>
+</html>
