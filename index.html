@@ -15,6 +15,9 @@
             --light: #f7fff7;
             --accent: #ff9f1c;
             --payment: #6c5ce7;
+            --pending: #ff9f1c;
+            --completed: #4CAF50;
+            --cancelled: #f44336;
         }
         
         * {
@@ -201,10 +204,6 @@
             flex-wrap: wrap;
         }
         
-        .timer-btn {
-            background-color: var(--secondary);
-        }
-        
         .map-btn {
             background-color: var(--dark);
         }
@@ -213,21 +212,27 @@
             background-color: var(--payment);
         }
         
-        .timer {
-            font-weight: bold;
-            color: var(--primary);
-            margin-right: 10px;
-        }
-        
         .status-badge {
             position: absolute;
             top: 10px;
             right: 10px;
-            background-color: var(--accent);
             color: white;
-            padding: 3px 8px;
-            border-radius: 5px;
+            padding: 5px 10px;
+            border-radius: 20px;
             font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .status-pending {
+            background-color: var(--pending);
+        }
+        
+        .status-completed {
+            background-color: var(--completed);
+        }
+        
+        .status-cancelled {
+            background-color: var(--cancelled);
         }
         
         /* Payment Modal Styles */
@@ -308,6 +313,17 @@
             
             .action-buttons {
                 flex-direction: column;
+                width: 100%;
+            }
+            
+            .order-footer {
+                flex-direction: column;
+                gap: 15px;
+            }
+            
+            .order-time {
+                width: 100%;
+                text-align: center;
             }
         }
     </style>
@@ -377,6 +393,7 @@
 
         // Parse order message
         function parseOrderMessage(message) {
+            const timeString = extractValue(message, 'Time:');
             const order = {
                 name: extractValue(message, 'Name:'),
                 mobile: extractValue(message, 'Mobile:'),
@@ -385,10 +402,8 @@
                 deliveryCharge: extractValue(message, 'Delivery Charge:'),
                 grandTotal: extractValue(message, 'Grand Total:'),
                 location: extractValue(message, 'Location:'),
-                time: extractValue(message, 'Time:'),
+                time: timeString ? new Date(timeString) : new Date(),
                 status: 'pending',
-                timerActive: false,
-                timerEnd: null,
                 paymentRequested: false,
                 paymentTimerEnd: null
             };
@@ -428,12 +443,21 @@
             card.className = 'order-card';
             card.id = `order-${orderNumber}`;
             
-            // Format time
-            const formattedTime = order.time ? order.time.replace(',', ' at') : '';
-            
+            // Format time - handle both Date objects and Firestore Timestamps
+            let formattedTime = '';
+            if (order.time) {
+                if (typeof order.time.toDate === 'function') {
+                    formattedTime = order.time.toDate().toLocaleString();
+                } else if (order.time.seconds) {
+                    formattedTime = new Date(order.time.seconds * 1000).toLocaleString();
+                } else if (order.time instanceof Date) {
+                    formattedTime = order.time.toLocaleString();
+                }
+            }
+
             // Status badge
             const statusBadge = document.createElement('div');
-            statusBadge.className = 'status-badge';
+            statusBadge.className = `status-badge status-${order.status}`;
             statusBadge.textContent = order.status;
             card.appendChild(statusBadge);
             
@@ -478,9 +502,7 @@
             const whatsappBtn = document.createElement('button');
             whatsappBtn.className = 'contact-btn whatsapp-btn';
             whatsappBtn.innerHTML = '💬 WhatsApp';
-            whatsappBtn.onclick = () => window.open(`https://wa.me/91${order.mobile}?text=Hi ${order.name}, Please confirm if you really want this order.
-Reply with YES to confirm or NO to cancel.
- #${orderNumber}`, '_blank');
+            whatsappBtn.onclick = () => window.open(`https://wa.me/91${order.mobile}?text=Hi ${order.name}, Regarding your order #${orderNumber}`, '_blank');
             contactButtons.appendChild(whatsappBtn);
             
             customerInfo.appendChild(contactButtons);
@@ -490,20 +512,28 @@ Reply with YES to confirm or NO to cancel.
             const orderItems = document.createElement('div');
             orderItems.className = 'order-items';
             
-            order.items.forEach(item => {
-                const itemDiv = document.createElement('div');
-                itemDiv.className = 'order-item';
-                
-                const itemName = document.createElement('div');
-                itemName.textContent = `${item.name} x${item.quantity}`;
-                itemDiv.appendChild(itemName);
-                
-                const itemPrice = document.createElement('div');
-                itemPrice.textContent = `₹${item.total}`;
-                itemDiv.appendChild(itemPrice);
-                
-                orderItems.appendChild(itemDiv);
-            });
+            if (order.items && order.items.length > 0) {
+                order.items.forEach(item => {
+                    const itemDiv = document.createElement('div');
+                    itemDiv.className = 'order-item';
+                    
+                    const itemName = document.createElement('div');
+                    itemName.textContent = `${item.name} x${item.quantity}`;
+                    itemDiv.appendChild(itemName);
+                    
+                    const itemPrice = document.createElement('div');
+                    itemPrice.textContent = `₹${item.total}`;
+                    itemDiv.appendChild(itemPrice);
+                    
+                    orderItems.appendChild(itemDiv);
+                });
+            } else {
+                const noItems = document.createElement('div');
+                noItems.textContent = 'No items found';
+                noItems.style.color = '#999';
+                noItems.style.fontStyle = 'italic';
+                orderItems.appendChild(noItems);
+            }
             
             card.appendChild(orderItems);
             
@@ -513,17 +543,17 @@ Reply with YES to confirm or NO to cancel.
             
             const subtotalRow = document.createElement('div');
             subtotalRow.className = 'summary-row';
-            subtotalRow.innerHTML = '<div>Subtotal:</div><div>₹' + order.subtotal + '</div>';
+            subtotalRow.innerHTML = '<div>Subtotal:</div><div>₹' + (order.subtotal || '0') + '</div>';
             orderSummary.appendChild(subtotalRow);
             
             const deliveryRow = document.createElement('div');
             deliveryRow.className = 'summary-row';
-            deliveryRow.innerHTML = '<div>Delivery Charge:</div><div>₹' + order.deliveryCharge + '</div>';
+            deliveryRow.innerHTML = '<div>Delivery Charge:</div><div>₹' + (order.deliveryCharge || '0') + '</div>';
             orderSummary.appendChild(deliveryRow);
             
             const totalRow = document.createElement('div');
             totalRow.className = 'summary-row total-row';
-            totalRow.innerHTML = '<div>Total:</div><div>₹' + order.grandTotal + '</div>';
+            totalRow.innerHTML = '<div>Total:</div><div>₹' + (order.grandTotal || '0') + '</div>';
             orderSummary.appendChild(totalRow);
             
             card.appendChild(orderSummary);
@@ -534,7 +564,7 @@ Reply with YES to confirm or NO to cancel.
             
             const orderTime = document.createElement('div');
             orderTime.className = 'order-time';
-            orderTime.textContent = formattedTime;
+            orderTime.textContent = formattedTime || 'Time not specified';
             orderFooter.appendChild(orderTime);
             
             const actionButtons = document.createElement('div');
@@ -547,41 +577,15 @@ Reply with YES to confirm or NO to cancel.
             paymentBtn.onclick = () => initiatePayment(order, orderNumber);
             actionButtons.appendChild(paymentBtn);
             
-            // Timer button
-            const timerBtn = document.createElement('button');
-            timerBtn.className = 'timer-btn';
-            timerBtn.textContent = '⏱️ Start 25-min Timer';
-            timerBtn.onclick = () => startTimer(card, order, orderNumber);
-            actionButtons.appendChild(timerBtn);
-            
             // Map button
             const mapBtn = document.createElement('button');
             mapBtn.className = 'map-btn';
-            mapBtn.textContent = '🗺️ Start Ride';
+            mapBtn.textContent = '🗺️ View Location';
             mapBtn.onclick = () => window.open(`https://www.google.com/maps?q=${order.location}`, '_blank');
             actionButtons.appendChild(mapBtn);
             
             orderFooter.appendChild(actionButtons);
             card.appendChild(orderFooter);
-            
-            // Add timer display if timer is active
-            if (order.timerActive && order.timerEnd) {
-                const timerDisplay = document.createElement('div');
-                timerDisplay.className = 'timer';
-                timerDisplay.id = `timer-${orderNumber}`;
-                card.querySelector('.action-buttons').prepend(timerDisplay);
-                updateTimerDisplay(orderNumber, order.timerEnd);
-            }
-            
-            // Add payment timer if payment was requested
-            if (order.paymentRequested && order.paymentTimerEnd) {
-                const paymentTimerDisplay = document.createElement('div');
-                paymentTimerDisplay.className = 'timer';
-                paymentTimerDisplay.id = `payment-timer-${orderNumber}`;
-                paymentTimerDisplay.textContent = 'Payment Pending: ';
-                card.querySelector('.action-buttons').prepend(paymentTimerDisplay);
-                updatePaymentTimerDisplay(orderNumber, new Date(order.paymentTimerEnd));
-            }
             
             return card;
         }
@@ -589,7 +593,7 @@ Reply with YES to confirm or NO to cancel.
         // Payment functions
         function initiatePayment(order, orderNumber) {
             // Generate UPI payment link
-            const amount = order.grandTotal.replace('₹', '').trim();
+            const amount = order.grandTotal ? order.grandTotal.replace('₹', '').trim() : '0';
             const upiLink = `upi://pay?pa=9306018924@axl&pn=Jatin%20%20.&mc=0000&mode=02&purpose=00&am=${amount}&cu=INR`;
             
             // Show modal with QR code and payment link
@@ -605,36 +609,22 @@ Reply with YES to confirm or NO to cancel.
                 paymentTimerEnd: paymentEndTime.toISOString()
             });
             
-            // Update UI
-            const card = document.getElementById(`order-${orderNumber}`);
-            if (card) {
-                let paymentTimerDisplay = card.querySelector(`#payment-timer-${orderNumber}`);
-                if (!paymentTimerDisplay) {
-                    paymentTimerDisplay = document.createElement('div');
-                    paymentTimerDisplay.className = 'timer';
-                    paymentTimerDisplay.id = `payment-timer-${orderNumber}`;
-                    paymentTimerDisplay.textContent = 'Payment Pending: ';
-                    card.querySelector('.action-buttons').prepend(paymentTimerDisplay);
-                }
-                updatePaymentTimerDisplay(orderNumber, paymentEndTime);
-            }
-            
             // Store current order for timer reference
             currentPaymentOrder = { orderNumber, paymentEndTime };
         }
 
         function showPaymentModal(upiLink, amount) {
             // Clear old QR code
-qrCodeElement.innerHTML = "";
+            qrCodeElement.innerHTML = "";
 
-// Generate QR code and append
-QRCode.toCanvas(document.createElement("canvas"), upiLink, { width: 200 }, (error, canvas) => {
-    if (error) {
-        console.error('QR code generation error:', error);
-        return;
-    }
-    qrCodeElement.appendChild(canvas);
-});
+            // Generate QR code and append
+            QRCode.toCanvas(document.createElement("canvas"), upiLink, { width: 200 }, (error, canvas) => {
+                if (error) {
+                    console.error('QR code generation error:', error);
+                    return;
+                }
+                qrCodeElement.appendChild(canvas);
+            });
             
             // Set payment link
             paymentLink.href = upiLink;
@@ -667,77 +657,6 @@ QRCode.toCanvas(document.createElement("canvas"), upiLink, { width: 200 }, (erro
             }, 1000);
         }
 
-        function updatePaymentTimerDisplay(orderNumber, endTime) {
-            const timerDisplay = document.getElementById(`payment-timer-${orderNumber}`);
-            if (!timerDisplay) return;
-            
-            const now = new Date();
-            const end = new Date(endTime);
-            const diff = end - now;
-            
-            if (diff <= 0) {
-                timerDisplay.textContent = 'Payment Time Expired';
-                return;
-            }
-            
-            const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-            const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-            
-            timerDisplay.textContent = `Payment Pending: ${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
-            
-            setTimeout(() => updatePaymentTimerDisplay(orderNumber, endTime), 1000);
-        }
-
-        // Timer functions
-        function startTimer(card, order, orderNumber) {
-            const now = new Date();
-            const endTime = new Date(now.getTime() + 25 * 60000); // 25 minutes from now
-            
-            // Update order in Firestore
-            db.collection('orders').doc(`order-${orderNumber}`).update({
-                timerActive: true,
-                timerEnd: endTime.toISOString()
-            });
-            
-            // Create timer display if it doesn't exist
-            let timerDisplay = card.querySelector('.timer');
-            if (!timerDisplay) {
-                timerDisplay = document.createElement('div');
-                timerDisplay.className = 'timer';
-                timerDisplay.id = `timer-${orderNumber}`;
-                card.querySelector('.action-buttons').prepend(timerDisplay);
-            }
-            
-            // Disable timer button
-            const timerBtn = card.querySelector('.timer-btn');
-            timerBtn.disabled = true;
-            timerBtn.textContent = 'Timer Running';
-            
-            // Start updating the display
-            updateTimerDisplay(orderNumber, endTime);
-        }
-
-        function updateTimerDisplay(orderNumber, endTime) {
-            const timerDisplay = document.getElementById(`timer-${orderNumber}`);
-            if (!timerDisplay) return;
-            
-            const now = new Date();
-            const end = new Date(endTime);
-            const diff = end - now;
-            
-            if (diff <= 0) {
-                timerDisplay.textContent = 'Time expired!';
-                return;
-            }
-            
-            const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-            const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-            
-            timerDisplay.textContent = `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
-            
-            setTimeout(() => updateTimerDisplay(orderNumber, endTime), 1000);
-        }
-
         // Save order to Firestore
         function saveOrderToFirestore(order, orderNumber) {
             return db.collection('orders').doc(`order-${orderNumber}`).set({
@@ -760,17 +679,15 @@ QRCode.toCanvas(document.createElement("canvas"), upiLink, { width: 200 }, (erro
                         orderCounter = orderNumber;
                     }
                     
+                    // Convert Firestore Timestamp to Date if needed
+                    if (orderData.time && typeof orderData.time.toDate === 'function') {
+                        orderData.time = orderData.time.toDate();
+                    } else if (orderData.time && orderData.time.seconds) {
+                        orderData.time = new Date(orderData.time.seconds * 1000);
+                    }
+                    
                     const card = createOrderCard(orderData, orderNumber);
                     ordersContainer.appendChild(card);
-                    
-                    // Update timers if active
-                    if (orderData.timerActive && orderData.timerEnd) {
-                        updateTimerDisplay(orderNumber, new Date(orderData.timerEnd));
-                    }
-                    
-                    if (orderData.paymentRequested && orderData.paymentTimerEnd) {
-                        updatePaymentTimerDisplay(orderNumber, new Date(orderData.paymentTimerEnd));
-                    }
                 });
             });
         }
