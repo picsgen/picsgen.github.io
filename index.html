@@ -478,7 +478,9 @@
             const whatsappBtn = document.createElement('button');
             whatsappBtn.className = 'contact-btn whatsapp-btn';
             whatsappBtn.innerHTML = '💬 WhatsApp';
-            whatsappBtn.onclick = () => window.open(`https://wa.me/91${order.mobile}?text=Hi ${order.name}, this is regarding your food order #${orderNumber}`, '_blank');
+            whatsappBtn.onclick = () => window.open(`https://wa.me/91${order.mobile}?text=Hi ${order.name}, Please confirm if you really want this order.
+Reply with YES to confirm or NO to cancel.
+ #${orderNumber}`, '_blank');
             contactButtons.appendChild(whatsappBtn);
             
             customerInfo.appendChild(contactButtons);
