@@ -6,6 +6,7 @@
     <title>Food Delivery Order Management</title>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
     <style>
         :root {
             --primary: #ff6b6b;
@@ -13,6 +14,7 @@
             --dark: #292f36;
             --light: #f7fff7;
             --accent: #ff9f1c;
+            --payment: #6c5ce7;
         }
         
         * {
@@ -67,11 +69,12 @@
             border-radius: 5px;
             cursor: pointer;
             font-size: 16px;
-            transition: background-color 0.3s;
+            transition: all 0.3s;
         }
         
         button:hover {
-            background-color: #ff5252;
+            opacity: 0.9;
+            transform: translateY(-2px);
         }
         
         .orders-container {
@@ -132,6 +135,12 @@
             display: flex;
             align-items: center;
             gap: 5px;
+            transition: all 0.3s;
+        }
+        
+        .contact-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
         
         .call-btn {
@@ -189,6 +198,7 @@
         .action-buttons {
             display: flex;
             gap: 10px;
+            flex-wrap: wrap;
         }
         
         .timer-btn {
@@ -199,9 +209,14 @@
             background-color: var(--dark);
         }
         
+        .payment-btn {
+            background-color: var(--payment);
+        }
+        
         .timer {
             font-weight: bold;
             color: var(--primary);
+            margin-right: 10px;
         }
         
         .status-badge {
@@ -213,6 +228,87 @@
             padding: 3px 8px;
             border-radius: 5px;
             font-size: 12px;
+        }
+        
+        /* Payment Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.7);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .modal-content {
+            background-color: white;
+            padding: 25px;
+            border-radius: 10px;
+            width: 90%;
+            max-width: 400px;
+            text-align: center;
+            position: relative;
+        }
+        
+        .close-modal {
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            font-size: 24px;
+            cursor: pointer;
+            color: #666;
+        }
+        
+        .qr-code {
+            margin: 20px auto;
+            width: 200px;
+            height: 200px;
+            border: 1px solid #eee;
+            padding: 10px;
+            background-color: white;
+        }
+        
+        .payment-timer {
+            font-size: 24px;
+            font-weight: bold;
+            color: var(--primary);
+            margin: 15px 0;
+        }
+        
+        .payment-link {
+            margin-top: 15px;
+            word-break: break-all;
+            color: var(--payment);
+            text-decoration: none;
+            display: inline-block;
+            padding: 8px 12px;
+            background-color: #f5f5f5;
+            border-radius: 5px;
+        }
+        
+        .copy-btn {
+            background-color: var(--dark);
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+        
+        @media (max-width: 768px) {
+            .orders-container {
+                grid-template-columns: 1fr;
+            }
+            
+            .action-buttons {
+                flex-direction: column;
+            }
         }
     </style>
 </head>
@@ -228,6 +324,23 @@
         
         <div class="orders-container" id="ordersContainer">
             <!-- Orders will be displayed here -->
+        </div>
+    </div>
+
+    <!-- Payment Modal -->
+    <div class="modal" id="paymentModal">
+        <div class="modal-content">
+            <span class="close-modal">&times;</span>
+            <h2>Payment Request</h2>
+            <p>Scan QR code or click payment link</p>
+            
+            <div class="qr-code" id="qrCode"></div>
+            
+            <div class="payment-timer" id="paymentTimer">05:00</div>
+            
+            <a href="#" class="payment-link" id="paymentLink" target="_blank"></a>
+            
+            <button class="copy-btn" id="copyBtn">Copy Payment Link</button>
         </div>
     </div>
 
@@ -250,9 +363,17 @@
         const orderInput = document.getElementById('orderInput');
         const generateBtn = document.getElementById('generateBtn');
         const ordersContainer = document.getElementById('ordersContainer');
+        const paymentModal = document.getElementById('paymentModal');
+        const qrCodeElement = document.getElementById('qrCode');
+        const paymentLink = document.getElementById('paymentLink');
+        const copyBtn = document.getElementById('copyBtn');
+        const paymentTimer = document.getElementById('paymentTimer');
+        const closeModal = document.querySelector('.close-modal');
 
         // Global order counter
         let orderCounter = 0;
+        let paymentTimerInterval;
+        let currentPaymentOrder = null;
 
         // Parse order message
         function parseOrderMessage(message) {
@@ -267,7 +388,9 @@
                 time: extractValue(message, 'Time:'),
                 status: 'pending',
                 timerActive: false,
-                timerEnd: null
+                timerEnd: null,
+                paymentRequested: false,
+                paymentTimerEnd: null
             };
             return order;
         }
@@ -303,6 +426,7 @@
         function createOrderCard(order, orderNumber) {
             const card = document.createElement('div');
             card.className = 'order-card';
+            card.id = `order-${orderNumber}`;
             
             // Format time
             const formattedTime = order.time ? order.time.replace(',', ' at') : '';
@@ -414,15 +538,24 @@
             const actionButtons = document.createElement('div');
             actionButtons.className = 'action-buttons';
             
+            // Payment button
+            const paymentBtn = document.createElement('button');
+            paymentBtn.className = 'payment-btn';
+            paymentBtn.innerHTML = '💳 Request Payment';
+            paymentBtn.onclick = () => initiatePayment(order, orderNumber);
+            actionButtons.appendChild(paymentBtn);
+            
+            // Timer button
             const timerBtn = document.createElement('button');
             timerBtn.className = 'timer-btn';
-            timerBtn.textContent = 'Start 25-min Timer';
+            timerBtn.textContent = '⏱️ Start 25-min Timer';
             timerBtn.onclick = () => startTimer(card, order, orderNumber);
             actionButtons.appendChild(timerBtn);
             
+            // Map button
             const mapBtn = document.createElement('button');
             mapBtn.className = 'map-btn';
-            mapBtn.textContent = 'Start Ride';
+            mapBtn.textContent = '🗺️ Start Ride';
             mapBtn.onclick = () => window.open(`https://www.google.com/maps?q=${order.location}`, '_blank');
             actionButtons.appendChild(mapBtn);
             
@@ -438,7 +571,119 @@
                 updateTimerDisplay(orderNumber, order.timerEnd);
             }
             
+            // Add payment timer if payment was requested
+            if (order.paymentRequested && order.paymentTimerEnd) {
+                const paymentTimerDisplay = document.createElement('div');
+                paymentTimerDisplay.className = 'timer';
+                paymentTimerDisplay.id = `payment-timer-${orderNumber}`;
+                paymentTimerDisplay.textContent = 'Payment Pending: ';
+                card.querySelector('.action-buttons').prepend(paymentTimerDisplay);
+                updatePaymentTimerDisplay(orderNumber, new Date(order.paymentTimerEnd));
+            }
+            
             return card;
+        }
+
+        // Payment functions
+        function initiatePayment(order, orderNumber) {
+            // Generate UPI payment link
+            const amount = order.grandTotal.replace('₹', '').trim();
+            const upiLink = `upi://pay?pa=9306018924@axl&pn=Jatin%20%20.&mc=0000&mode=02&purpose=00&am=${amount}&cu=INR`;
+            
+            // Show modal with QR code and payment link
+            showPaymentModal(upiLink, amount);
+            
+            // Start 5-minute payment timer
+            const now = new Date();
+            const paymentEndTime = new Date(now.getTime() + 5 * 60000); // 5 minutes
+            
+            // Update order in Firestore
+            db.collection('orders').doc(`order-${orderNumber}`).update({
+                paymentRequested: true,
+                paymentTimerEnd: paymentEndTime.toISOString()
+            });
+            
+            // Update UI
+            const card = document.getElementById(`order-${orderNumber}`);
+            if (card) {
+                let paymentTimerDisplay = card.querySelector(`#payment-timer-${orderNumber}`);
+                if (!paymentTimerDisplay) {
+                    paymentTimerDisplay = document.createElement('div');
+                    paymentTimerDisplay.className = 'timer';
+                    paymentTimerDisplay.id = `payment-timer-${orderNumber}`;
+                    paymentTimerDisplay.textContent = 'Payment Pending: ';
+                    card.querySelector('.action-buttons').prepend(paymentTimerDisplay);
+                }
+                updatePaymentTimerDisplay(orderNumber, paymentEndTime);
+            }
+            
+            // Store current order for timer reference
+            currentPaymentOrder = { orderNumber, paymentEndTime };
+        }
+
+        function showPaymentModal(upiLink, amount) {
+            // Clear old QR code
+qrCodeElement.innerHTML = "";
+
+// Generate QR code and append
+QRCode.toCanvas(document.createElement("canvas"), upiLink, { width: 200 }, (error, canvas) => {
+    if (error) {
+        console.error('QR code generation error:', error);
+        return;
+    }
+    qrCodeElement.appendChild(canvas);
+});
+            
+            // Set payment link
+            paymentLink.href = upiLink;
+            paymentLink.textContent = `Pay ₹${amount}`;
+            
+            // Start timer display
+            startPaymentTimer();
+            
+            // Show modal
+            paymentModal.style.display = 'flex';
+        }
+
+        function startPaymentTimer() {
+            let timeLeft = 300; // 5 minutes in seconds
+            
+            clearInterval(paymentTimerInterval);
+            
+            paymentTimerInterval = setInterval(() => {
+                timeLeft--;
+                
+                const minutes = Math.floor(timeLeft / 60);
+                const seconds = timeLeft % 60;
+                
+                paymentTimer.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                
+                if (timeLeft <= 0) {
+                    clearInterval(paymentTimerInterval);
+                    paymentTimer.textContent = "Time expired!";
+                }
+            }, 1000);
+        }
+
+        function updatePaymentTimerDisplay(orderNumber, endTime) {
+            const timerDisplay = document.getElementById(`payment-timer-${orderNumber}`);
+            if (!timerDisplay) return;
+            
+            const now = new Date();
+            const end = new Date(endTime);
+            const diff = end - now;
+            
+            if (diff <= 0) {
+                timerDisplay.textContent = 'Payment Time Expired';
+                return;
+            }
+            
+            const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+            
+            timerDisplay.textContent = `Payment Pending: ${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+            
+            setTimeout(() => updatePaymentTimerDisplay(orderNumber, endTime), 1000);
         }
 
         // Timer functions
@@ -486,7 +731,7 @@
             const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
             const seconds = Math.floor((diff % (1000 * 60)) / 1000);
             
-            timerDisplay.textContent = `${Math.floor(minutes)}:${seconds < 10 ? '0' : ''}${seconds}`;
+            timerDisplay.textContent = `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
             
             setTimeout(() => updateTimerDisplay(orderNumber, endTime), 1000);
         }
@@ -515,6 +760,15 @@
                     
                     const card = createOrderCard(orderData, orderNumber);
                     ordersContainer.appendChild(card);
+                    
+                    // Update timers if active
+                    if (orderData.timerActive && orderData.timerEnd) {
+                        updateTimerDisplay(orderNumber, new Date(orderData.timerEnd));
+                    }
+                    
+                    if (orderData.paymentRequested && orderData.paymentTimerEnd) {
+                        updatePaymentTimerDisplay(orderNumber, new Date(orderData.paymentTimerEnd));
+                    }
                 });
             });
         }
@@ -534,6 +788,28 @@
             }).catch(error => {
                 console.error('Error saving order:', error);
             });
+        });
+
+        closeModal.addEventListener('click', () => {
+            paymentModal.style.display = 'none';
+            clearInterval(paymentTimerInterval);
+        });
+
+        copyBtn.addEventListener('click', () => {
+            navigator.clipboard.writeText(paymentLink.href).then(() => {
+                copyBtn.textContent = 'Copied!';
+                setTimeout(() => {
+                    copyBtn.textContent = 'Copy Payment Link';
+                }, 2000);
+            });
+        });
+
+        // Close modal when clicking outside
+        window.addEventListener('click', (event) => {
+            if (event.target === paymentModal) {
+                paymentModal.style.display = 'none';
+                clearInterval(paymentTimerInterval);
+            }
         });
 
         // Initialize the app
