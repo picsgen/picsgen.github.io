@@ -361,7 +361,7 @@
     </div>
 
     <script>
-        // Firebase configuration and initialization
+        // Firebase configuration
         const firebaseConfig = {
             apiKey: "AIzaSyA1irPLEM3r7u7V_ym3VA5ynWlYWl0C-JM",
             authDomain: "foodu-94983.firebaseapp.com",
@@ -372,7 +372,7 @@
         };
 
         // Initialize Firebase
-        firebase.initializeApp(firebaseConfig);
+        const app = firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore();
 
         // DOM elements
@@ -389,52 +389,99 @@
         // Global order counter
         let orderCounter = 0;
         let paymentTimerInterval;
-        let currentPaymentOrder = null;
+        // Custom Date Parser (DD/MM/YYYY, HH:MM:SS)
+function parseCustomDate(dateStr) {
+    // Format: 19/08/2025, 12:23:16
+    const match = dateStr.match(/(\d{2})\/(\d{2})\/(\d{4}),\s*(\d{2}):(\d{2}):(\d{2})/);
+    if (match) {
+        const [, day, month, year, hours, minutes, seconds] = match;
+        return new Date(
+            parseInt(year),
+            parseInt(month) - 1, // Month 0-based
+            parseInt(day),
+            parseInt(hours),
+            parseInt(minutes),
+            parseInt(seconds)
+        );
+    }
+    return new Date(); // fallback
+}
+
+        // Validate order message format
+        function validateOrderMessage(message) {
+            const requiredFields = ['Name:', 'Mobile:', 'Items:', 'Location:'];
+            return requiredFields.every(field => message.includes(field));
+        }
 
         // Parse order message
         function parseOrderMessage(message) {
-            const timeString = extractValue(message, 'Time:');
-            const order = {
-                name: extractValue(message, 'Name:'),
-                mobile: extractValue(message, 'Mobile:'),
-                items: extractItems(message),
-                subtotal: extractValue(message, 'Subtotal:'),
-                deliveryCharge: extractValue(message, 'Delivery Charge:'),
-                grandTotal: extractValue(message, 'Grand Total:'),
-                location: extractValue(message, 'Location:'),
-                time: timeString ? new Date(timeString) : new Date(),
-                status: 'pending',
-                paymentRequested: false,
-                paymentTimerEnd: null
-            };
-            return order;
+            if (!message) return null;
+            
+            if (!validateOrderMessage(message)) {
+                throw new Error('Invalid order format. Missing required fields.');
+            }
+            
+            try {
+                const timeString = extractValue(message, 'Time:');
+                const order = {
+                    name: extractValue(message, 'Name:') || 'No Name',
+                    mobile: extractValue(message, 'Mobile:') || 'No Phone',
+                    items: extractItems(message),
+                    subtotal: extractValue(message, 'Subtotal:') || '0',
+                    deliveryCharge: extractValue(message, 'Delivery Charge:') || '0',
+                    grandTotal: extractValue(message, 'Grand Total:') || '0',
+                    location: extractValue(message, 'Location:') || 'No Location',
+                    time: timeString ? parseCustomDate(timeString) : new Date(),
+                    status: 'pending',
+                    paymentRequested: false
+                };
+                return order;
+            } catch (error) {
+                console.error('Error parsing order:', error);
+                throw error;
+            }
         }
 
         function extractValue(text, key) {
+            if (!text || !key) return '';
             const regex = new RegExp(`${key}\\s*(.*)`);
             const match = text.match(regex);
             return match ? match[1].split('\n')[0].trim() : '';
         }
 
         function extractItems(text) {
-            const itemsSection = text.match(/Items:\n([\s\S]*?)Total Items:/);
-            if (!itemsSection) return [];
-            
-            const itemsText = itemsSection[1];
-            const itemLines = itemsText.split('\n').filter(line => line.trim().startsWith('-'));
-            
-            return itemLines.map(line => {
-                const match = line.match(/-\s*(.*?)\s*\(₹(.*?)\s*per.*?\)\s*x(\d+)\s*=\s*₹(.*)/);
-                if (match) {
+            try {
+                const itemsMatch = text.match(/Items:\n([\s\S]*?)(?:\nTotal Items:|\nSubtotal:|$)/i);
+                if (!itemsMatch) return [];
+                
+                const itemsText = itemsMatch[1];
+                const itemLines = itemsText.split('\n').filter(line => line.trim().startsWith('-'));
+                
+                return itemLines.map(line => {
+                    // Updated pattern to match your format
+                    const pattern = /-\s*(.*?)\s*x\s*(\d+)\s*=\s*₹?([\d.]+)/;
+                    const match = line.match(pattern);
+                    
+                    if (match) {
+                        return {
+                            name: (match[1] || 'Item').trim(),
+                            price: (match[3] || '0').trim(), // Price per item
+                            quantity: (match[2] || '1').trim(),
+                            total: (match[3] || '0').trim() // Total for quantity
+                        };
+                    }
+                    
                     return {
-                        name: match[1].trim(),
-                        price: match[2].trim(),
-                        quantity: match[3].trim(),
-                        total: match[4].trim()
+                        name: line.replace('-', '').trim(),
+                        price: '0',
+                        quantity: '1',
+                        total: '0'
                     };
-                }
-                return null;
-            }).filter(item => item !== null);
+                });
+            } catch (error) {
+                console.error('Error extracting items:', error);
+                return [];
+            }
         }
 
         // Create order card
@@ -443,22 +490,26 @@
             card.className = 'order-card';
             card.id = `order-${orderNumber}`;
             
-            // Format time - handle both Date objects and Firestore Timestamps
+            // Format time
             let formattedTime = '';
             if (order.time) {
-                if (typeof order.time.toDate === 'function') {
-                    formattedTime = order.time.toDate().toLocaleString();
-                } else if (order.time.seconds) {
-                    formattedTime = new Date(order.time.seconds * 1000).toLocaleString();
-                } else if (order.time instanceof Date) {
-                    formattedTime = order.time.toLocaleString();
+                try {
+                    if (typeof order.time.toDate === 'function') {
+                        formattedTime = order.time.toDate().toLocaleString();
+                    } else if (order.time.seconds) {
+                        formattedTime = new Date(order.time.seconds * 1000).toLocaleString();
+                    } else {
+                        formattedTime = new Date(order.time).toLocaleString();
+                    }
+                } catch (e) {
+                    formattedTime = 'Time not specified';
                 }
             }
 
             // Status badge
             const statusBadge = document.createElement('div');
-            statusBadge.className = `status-badge status-${order.status}`;
-            statusBadge.textContent = order.status;
+            statusBadge.className = `status-badge status-${order.status || 'pending'}`;
+            statusBadge.textContent = order.status || 'pending';
             card.appendChild(statusBadge);
             
             // Order header with number
@@ -599,18 +650,10 @@
             // Show modal with QR code and payment link
             showPaymentModal(upiLink, amount);
             
-            // Start 5-minute payment timer
-            const now = new Date();
-            const paymentEndTime = new Date(now.getTime() + 5 * 60000); // 5 minutes
-            
             // Update order in Firestore
             db.collection('orders').doc(`order-${orderNumber}`).update({
-                paymentRequested: true,
-                paymentTimerEnd: paymentEndTime.toISOString()
+                paymentRequested: true
             });
-            
-            // Store current order for timer reference
-            currentPaymentOrder = { orderNumber, paymentEndTime };
         }
 
         function showPaymentModal(upiLink, amount) {
@@ -682,31 +725,37 @@
                     // Convert Firestore Timestamp to Date if needed
                     if (orderData.time && typeof orderData.time.toDate === 'function') {
                         orderData.time = orderData.time.toDate();
-                    } else if (orderData.time && orderData.time.seconds) {
-                        orderData.time = new Date(orderData.time.seconds * 1000);
                     }
                     
                     const card = createOrderCard(orderData, orderNumber);
-                    ordersContainer.appendChild(card);
+ordersContainer.prepend(card);
                 });
+            }).catch(error => {
+                console.error('Error loading orders:', error);
             });
         }
 
         // Event listeners
-        generateBtn.addEventListener('click', () => {
+        generateBtn.addEventListener('click', async () => {
             const message = orderInput.value.trim();
-            if (!message) return;
+            if (!message) {
+                alert('Please paste an order message first');
+                return;
+            }
             
-            orderCounter++;
-            const order = parseOrderMessage(message);
-            
-            saveOrderToFirestore(order, orderCounter).then(() => {
+            try {
+                const order = parseOrderMessage(message);
+                orderCounter++;
+                await saveOrderToFirestore(order, orderCounter);
+                
                 const card = createOrderCard(order, orderCounter);
                 ordersContainer.prepend(card);
                 orderInput.value = '';
-            }).catch(error => {
-                console.error('Error saving order:', error);
-            });
+            } catch (error) {
+                console.error('Error processing order:', error);
+                alert(`Failed to process order: ${error.message}`);
+                if (orderCounter > 0) orderCounter--; // Rollback counter if failed
+            }
         });
 
         closeModal.addEventListener('click', () => {
