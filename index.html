@@ -4,8 +4,38 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Food Delivery Order Management</title>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script type="module">
+        // Import the functions you need from the Firebase SDKs
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, updateDoc, doc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        
+        // Your web app's Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyA1irPLEM3r7u7V_ym3VA5ynWlYWl0C-JM",
+            authDomain: "foodu-94983.firebaseapp.com",
+            projectId: "foodu-94983",
+            storageBucket: "foodu-94983.appspot.com",
+            messagingSenderId: "872411238136",
+            appId: "1:872411238136:web:93b4568609ecc5bf99b50d"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        
+        // Make Firebase available globally
+        window.firebase = {
+            db,
+            collection,
+            addDoc,
+            onSnapshot,
+            query,
+            orderBy,
+            updateDoc,
+            doc,
+            serverTimestamp
+        };
+    </script>
     <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
     <style>
         :root {
@@ -361,885 +391,458 @@
     </div>
 
     <script>
-        // Firebase configuration
-        const firebaseConfig = {
-            apiKey: "AIzaSyA1irPLEM3r7u7V_ym3VA5ynWlYWl0C-JM",
-            authDomain: "foodu-94983.firebaseapp.com",
-            projectId: "foodu-94983",
-            storageBucket: "foodu-94983.appspot.com",
-            messagingSenderId: "872411238136",
-            appId: "1:872411238136:web:93b4568609ecc5bf99b50d"
-        };
-
-        // Initialize Firebase
-        const app = firebase.initializeApp(firebaseConfig);
-        const db = firebase.firestore();
-
-        // DOM elements
-        const orderInput = document.getElementById('orderInput');
-        const generateBtn = document.getElementById('generateBtn');
-        const ordersContainer = document.getElementById('ordersContainer');
-        const paymentModal = document.getElementById('paymentModal');
-        const qrCodeElement = document.getElementById('qrCode');
-        const paymentLink = document.getElementById('paymentLink');
-        const copyBtn = document.getElementById('copyBtn');
-        const paymentTimer = document.getElementById('paymentTimer');
-        const closeModal = document.querySelector('.close-modal');
-
-        // Global order counter
-        let orderCounter = 0;
-        let paymentTimerInterval;
+        // Wait for Firebase to be loaded
+        let db;
+        let firebaseInitialized = false;
         
-        // Custom Date Parser (DD/MM/YYYY, HH:MM:SS)
-        function parseCustomDate(dateStr) {
-            // Format: 19/08/2025, 12:23:16
-            const match = dateStr.match(/(\d{2})\/(\d{2})\/(\d{4}),\s*(\d{2}):(\d{2}):(\d{2})/);
-            if (match) {
-                const [, day, month, year, hours, minutes, seconds] = match;
-                return new Date(
-                    parseInt(year),
-                    parseInt(month) - 1, // Month 0-based
-                    parseInt(day),
-                    parseInt(hours),
-                    parseInt(minutes),
-                    parseInt(seconds)
+        const checkFirebase = setInterval(() => {
+            if (window.firebase && window.firebase.db) {
+                clearInterval(checkFirebase);
+                firebaseInitialized = true;
+                db = window.firebase.db;
+                initApp();
+            }
+        }, 100);
+
+        function initApp() {
+            // DOM elements
+            const orderInput = document.getElementById('orderInput');
+            const generateBtn = document.getElementById('generateBtn');
+            const ordersContainer = document.getElementById('ordersContainer');
+            const paymentModal = document.getElementById('paymentModal');
+            const qrCodeElement = document.getElementById('qrCode');
+            const paymentLink = document.getElementById('paymentLink');
+            const copyBtn = document.getElementById('copyBtn');
+            const paymentTimer = document.getElementById('paymentTimer');
+            const closeModal = document.querySelector('.close-modal');
+
+            // Global order counter
+            let orderCounter = 0;
+            let paymentTimerInterval;
+            let currentPaymentOrder = null;
+            
+            // Custom Date Parser (DD/MM/YYYY, HH:MM:SS)
+            function parseCustomDate(dateStr) {
+                // Format: 19/08/2025, 12:23:16
+                const match = dateStr.match(/(\d{2})\/(\d{2})\/(\d{4}),\s*(\d{2}):(\d{2}):(\d{2})/);
+                if (match) {
+                    const [, day, month, year, hours, minutes, seconds] = match;
+                    return new Date(
+                        parseInt(year),
+                        parseInt(month) - 1, // Month 0-based
+                        parseInt(day),
+                        parseInt(hours),
+                        parseInt(minutes),
+                        parseInt(seconds)
+                    );
+                }
+                return new Date(); // fallback
+            }
+
+            // Validate order message format
+            function validateOrderMessage(message) {
+                const requiredFields = ['Name:', 'Mobile:', 'Items:', 'Location:'];
+                return requiredFields.every(field => message.includes(field));
+            }
+
+            // Parse order message
+            function parseOrderMessage(message) {
+                if (!message) return null;
+                
+                if (!validateOrderMessage(message)) {
+                    throw new Error('Invalid order format. Missing required fields.');
+                }
+                
+                try {
+                    const timeString = extractValue(message, 'Time:');
+                    const order = {
+                        name: extractValue(message, 'Name:') || 'No Name',
+                        mobile: extractValue(message, 'Mobile:') || 'No Phone',
+                        items: extractItems(message),
+                        subtotal: extractValue(message, 'Subtotal:') || '0',
+                        deliveryCharge: extractValue(message, 'Delivery Charge:') || '0',
+                        grandTotal: extractValue(message, 'Grand Total:') || '0',
+                        location: extractValue(message, 'Location:') || 'No Location',
+                        time: timeString ? parseCustomDate(timeString) : new Date(),
+                        status: 'pending',
+                        paymentRequested: false,
+                        createdAt: window.firebase.serverTimestamp()
+                    };
+                    return order;
+                } catch (error) {
+                    console.error('Error parsing order:', error);
+                    throw error;
+                }
+            }
+
+            function extractValue(text, key) {
+                if (!text || !key) return '';
+                const regex = new RegExp(`${key}\\s*(.*)`);
+                const match = text.match(regex);
+                return match ? match[1].split('\n')[0].trim() : '';
+            }
+
+            function extractItems(text) {
+                try {
+                    const itemsMatch = text.match(/Items:\n([\s\S]*?)(?:\nTotal Items:|\nSubtotal:|$)/i);
+                    if (!itemsMatch) return [];
+                    
+                    const itemsText = itemsMatch[1];
+                    const itemLines = itemsText.split('\n').filter(line => line.trim().startsWith('-'));
+                    
+                    return itemLines.map(line => {
+                        // Updated pattern to match your format
+                        const pattern = /-\s*(.*?)\s*x\s*(\d+)\s*=\s*₹?([\d.]+)/;
+                        const match = line.match(pattern);
+                        
+                        if (match) {
+                            return {
+                                name: (match[1] || 'Item').trim(),
+                                price: (match[3] || '0').trim(), // Price per item
+                                quantity: (match[2] || '1').trim(),
+                                total: (match[3] || '0').trim() // Total for quantity
+                            };
+                        }
+                        
+                        return {
+                            name: line.replace('-', '').trim(),
+                            price: '0',
+                            quantity: '1',
+                            total: '0'
+                        };
+                    });
+                } catch (error) {
+                    console.error('Error extracting items:', error);
+                    return [];
+                }
+            }
+
+            // Create order card
+            function createOrderCard(order, orderNumber, docId = null) {
+                const card = document.createElement('div');
+                card.className = 'order-card';
+                card.id = docId || `order-${orderNumber}`;
+                
+                // Format time
+                let formattedTime = '';
+                if (order.time) {
+                    try {
+                        if (typeof order.time.toDate === 'function') {
+                            formattedTime = order.time.toDate().toLocaleString();
+                        } else if (order.time.seconds) {
+                            formattedTime = new Date(order.time.seconds * 1000).toLocaleString();
+                        } else {
+                            formattedTime = new Date(order.time).toLocaleString();
+                        }
+                    } catch (e) {
+                        formattedTime = 'Time not specified';
+                    }
+                }
+
+                // Status badge
+                const statusBadge = document.createElement('div');
+                statusBadge.className = `status-badge status-${order.status || 'pending'}`;
+                statusBadge.textContent = order.status || 'pending';
+                card.appendChild(statusBadge);
+                
+                // Order header with number
+                const orderHeader = document.createElement('div');
+                orderHeader.className = 'order-header';
+                
+                const orderNum = document.createElement('div');
+                orderNum.className = 'order-number';
+                orderNum.textContent = orderNumber;
+                orderHeader.appendChild(orderNum);
+                
+                const orderTitle = document.createElement('h3');
+                orderTitle.textContent = `Order #${orderNumber}`;
+                orderHeader.appendChild(orderTitle);
+                
+                card.appendChild(orderHeader);
+                
+                // Customer info
+                const customerInfo = document.createElement('div');
+                customerInfo.className = 'customer-info';
+                
+                const customerName = document.createElement('div');
+                customerName.className = 'customer-name';
+                customerName.textContent = order.name;
+                customerInfo.appendChild(customerName);
+                
+                const customerPhone = document.createElement('div');
+                customerPhone.textContent = `Phone: ${order.mobile}`;
+                customerInfo.appendChild(customerPhone);
+                
+                // Contact buttons
+                const contactButtons = document.createElement('div');
+                contactButtons.className = 'contact-buttons';
+                
+                const callBtn = document.createElement('button');
+                callBtn.className = 'contact-btn call-btn';
+                callBtn.innerHTML = '📞 Call';
+                callBtn.onclick = () => window.open(`tel:${order.mobile}`, '_blank');
+                contactButtons.appendChild(callBtn);
+                
+                const whatsappBtn = document.createElement('button');
+                whatsappBtn.className = 'contact-btn whatsapp-btn';
+                whatsappBtn.innerHTML = '💬 WhatsApp';
+                
+// Updated WhatsApp button functionality
+                whatsappBtn.onclick = () => {
+                    const orderDetailsText = order.items.map(i => `${i.name} x${i.quantity} = ₹${i.total}`).join("\n");
+                    const message = `Hello ${order.name},\nYour order details:\n${orderDetailsText}\n\nTotal: ₹${order.grandTotal}\n\nNow your order is being prepared. You can track your order here: https://zoomkart.store/track.html\n\nThank you for using our services 💝\nTeam Zoomkart`;
+                    const whatsappUrl = `https://wa.me/91${order.mobile}?text=${encodeURIComponent(message)}`;
+                    window.open(whatsappUrl, '_blank');
+                };
+                
+                contactButtons.appendChild(whatsappBtn);
+                
+                customerInfo.appendChild(contactButtons);
+                card.appendChild(customerInfo);
+                
+                // Order items
+                const orderItems = document.createElement('div');
+                orderItems.className = 'order-items';
+                
+                if (order.items && order.items.length > 0) {
+                    order.items.forEach(item => {
+                        const itemDiv = document.createElement('div');
+                        itemDiv.className = 'order-item';
+                        
+                        const itemName = document.createElement('div');
+                        itemName.textContent = `${item.name} x${item.quantity}`;
+                        itemDiv.appendChild(itemName);
+                        
+                        const itemPrice = document.createElement('div');
+                        itemPrice.textContent = `₹${item.total}`;
+                        itemDiv.appendChild(itemPrice);
+                        
+                        orderItems.appendChild(itemDiv);
+                    });
+                } else {
+                    const noItems = document.createElement('div');
+                    noItems.textContent = 'No items found';
+                    noItems.style.color = '#999';
+                    noItems.style.fontStyle = 'italic';
+                    orderItems.appendChild(noItems);
+                }
+                
+                card.appendChild(orderItems);
+                
+                // Order summary
+                const orderSummary = document.createElement('div');
+                orderSummary.className = 'order-summary';
+                
+                const subtotalRow = document.createElement('div');
+                subtotalRow.className = 'summary-row';
+                subtotalRow.innerHTML = '<div>Subtotal:</div><div>₹' + (order.subtotal || '0') + '</div>';
+                orderSummary.appendChild(subtotalRow);
+                
+                const deliveryRow = document.createElement('div');
+                deliveryRow.className = 'summary-row';
+                deliveryRow.innerHTML = '<div>Delivery Charge:</div><div>₹' + (order.deliveryCharge || '0') + '</div>';
+                orderSummary.appendChild(deliveryRow);
+                
+                const totalRow = document.createElement('div');
+                totalRow.className = 'summary-row total-row';
+                totalRow.innerHTML = '<div>Total:</div><div>₹' + (order.grandTotal || '0') + '</div>';
+                orderSummary.appendChild(totalRow);
+                
+                card.appendChild(orderSummary);
+                
+                // Order footer
+                const orderFooter = document.createElement('div');
+                orderFooter.className = 'order-footer';
+                
+                const orderTime = document.createElement('div');
+                orderTime.className = 'order-time';
+                orderTime.textContent = formattedTime || 'Time not specified';
+                orderFooter.appendChild(orderTime);
+                
+                const actionButtons = document.createElement('div');
+                actionButtons.className = 'action-buttons';
+                
+                // Payment button
+                const paymentBtn = document.createElement('button');
+                paymentBtn.className = 'payment-btn';
+                paymentBtn.innerHTML = '💳 Request Payment';
+                paymentBtn.onclick = () => initiatePayment(order, orderNumber, docId);
+                actionButtons.appendChild(paymentBtn);
+                
+                // Map button
+                const mapBtn = document.createElement('button');
+                mapBtn.className = 'map-btn';
+                mapBtn.textContent = '🗺️ View Location';
+                mapBtn.onclick = () => window.open(`https://www.google.com/maps?q=${encodeURIComponent(order.location)}`, '_blank');
+                actionButtons.appendChild(mapBtn);
+                
+                orderFooter.appendChild(actionButtons);
+                card.appendChild(orderFooter);
+                
+                return card;
+            }
+
+            // Payment functions
+            function initiatePayment(order, orderNumber, docId) {
+                currentPaymentOrder = {order, orderNumber, docId};
+                
+                // Generate UPI payment link
+                const amount = order.grandTotal ? order.grandTotal.replace('₹', '').trim() : '0';
+                const upiLink = `upi://pay?pa=9306018924@axl&pn=Jatin%20%20.&mc=0000&mode=02&purpose=00&am=${amount}&cu=INR`;
+                
+                // Show modal with QR code and payment link
+                showPaymentModal(upiLink, amount);
+                
+                // Update order in Firestore
+                if (docId) {
+                    window.firebase.updateDoc(window.firebase.doc(db, "orders", docId), {
+                        paymentRequested: true
+                    });
+                }
+            }
+
+            function showPaymentModal(upiLink, amount) {
+                // Clear old QR code
+                qrCodeElement.innerHTML = "";
+
+                // Generate QR code and append
+                QRCode.toCanvas(document.createElement("canvas"), upiLink, { width: 200 }, (error, canvas) => {
+                    if (error) {
+                        console.error('QR code generation error:', error);
+                        return;
+                    }
+                    qrCodeElement.appendChild(canvas);
+                });
+                
+                // Set payment link
+                paymentLink.href = upiLink;
+                paymentLink.textContent = `Pay ₹${amount}`;
+                
+                // Start timer display
+                startPaymentTimer();
+                
+                // Show modal
+                paymentModal.style.display = 'flex';
+            }
+
+            function startPaymentTimer() {
+                let timeLeft = 300; // 5 minutes in seconds
+                
+                clearInterval(paymentTimerInterval);
+                
+                paymentTimerInterval = setInterval(() => {
+                    timeLeft--;
+                    
+                    const minutes = Math.floor(timeLeft / 60);
+                    const seconds = timeLeft % 60;
+                    
+                    paymentTimer.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                    
+                    if (timeLeft <= 0) {
+                        clearInterval(paymentTimerInterval);
+                        paymentTimer.textContent = "Time expired!";
+                    }
+                }, 1000);
+            }
+
+            // Save order to Firestore
+            async function saveOrderToFirestore(order) {
+                try {
+                    const docRef = await window.firebase.addDoc(
+                        window.firebase.collection(db, "orders"), 
+                        order
+                    );
+                    return docRef.id;
+                } catch (error) {
+                    console.error("Error adding document: ", error);
+                    throw error;
+                }
+            }
+
+            // Load orders from Firestore
+            function loadOrdersFromFirestore() {
+                ordersContainer.innerHTML = '';
+                
+                const q = window.firebase.query(
+                    window.firebase.collection(db, "orders"),
+                    window.firebase.orderBy("createdAt", "desc")
                 );
-            }
-            return new Date(); // fallback
-        }
-
-        // Validate order message format
-        function validateOrderMessage(message) {
-            const requiredFields = ['Name:', 'Mobile:', 'Items:', 'Location:'];
-            return requiredFields.every(field => message.includes(field));
-        }
-
-        // Parse order message
-        function parseOrderMessage(message) {
-            if (!message) return null;
-            
-            if (!validateOrderMessage(message)) {
-                throw new Error('Invalid order format. Missing required fields.');
-            }
-            
-            try {
-                const timeString = extractValue(message, 'Time:');
-                const order = {
-                    name: extractValue(message, 'Name:') || 'No Name',
-                    mobile: extractValue(message, 'Mobile:') || 'No Phone',
-                    items: extractItems(message),
-                    subtotal: extractValue(message, 'Subtotal:') || '0',
-                    deliveryCharge: extractValue(message, 'Delivery Charge:') || '0',
-                    grandTotal: extractValue(message, 'Grand Total:') || '0',
-                    location: extractValue(message, 'Location:') || 'No Location',
-                    time: timeString ? parseCustomDate(timeString) : new Date(),
-                    status: 'pending',
-                    paymentRequested: false
-                };
-                return order;
-            } catch (error) {
-                console.error('Error parsing order:', error);
-                throw error;
-            }
-        }
-
-        function extractValue(text, key) {
-            if (!text || !key) return '';
-            const regex = new RegExp(`${key}\\s*(.*)`);
-            const match = text.match(regex);
-            return match ? match[1].split('\n')[0].trim() : '';
-        }
-
-        function extractItems(text) {
-            try {
-                const itemsMatch = text.match(/Items:\n([\s\S]*?)(?:\nTotal Items:|\nSubtotal:|$)/i);
-                if (!itemsMatch) return [];
                 
-                const itemsText = itemsMatch[1];
-                const itemLines = itemsText.split('\n').filter(line => line.trim().startsWith('-'));
-                
-                return itemLines.map(line => {
-                    // Updated pattern to match your format
-                    const pattern = /-\s*(.*?)\s*x\s*(\d+)\s*=\s*₹?([\d.]+)/;
-                    const match = line.match(pattern);
+                window.firebase.onSnapshot(q, (querySnapshot) => {
+                    ordersContainer.innerHTML = '';
                     
-                    if (match) {
-                        return {
-                            name: (match[1] || 'Item').trim(),
-                            price: (match[3] || '0').trim(), // Price per item
-                            quantity: (match[2] || '1').trim(),
-                            total: (match[3] || '0').trim() // Total for quantity
-                        };
-                    }
-                    
-                    return {
-                        name: line.replace('-', '').trim(),
-                        price: '0',
-                        quantity: '1',
-                        total: '0'
-                    };
+                    querySnapshot.forEach((doc) => {
+                        const orderData = doc.data();
+                        const docId = doc.id;
+                        
+                        // Get the highest order number to update the counter
+                        if (orderData.orderNumber > orderCounter) {
+                            orderCounter = orderData.orderNumber;
+                        }
+                        
+                        // Convert Firestore Timestamp to Date if needed
+                        if (orderData.time && typeof orderData.time.toDate === 'function') {
+                            orderData.time = orderData.time.toDate();
+                        }
+                        
+                        const card = createOrderCard(orderData, orderData.orderNumber, docId);
+                        ordersContainer.appendChild(card);
+                    });
+                }, (error) => {
+                    console.error('Error loading orders:', error);
                 });
-            } catch (error) {
-                console.error('Error extracting items:', error);
-                return [];
-            }
-        }
-
-        // Create order card
-        function createOrderCard(order, orderNumber) {
-            const card = document.createElement('div');
-            card.className = 'order-card';
-            card.id = `order-${orderNumber}`;
-            
-            // Format time
-            let formattedTime = '';
-            if (order.time) {
-                try {
-                    if (typeof order.time.toDate === 'function') {
-                        formattedTime = order.time.toDate().toLocaleString();
-                    } else if (order.time.seconds) {
-                        formattedTime = new Date(order.time.seconds * 1000).toLocaleString();
-                    } else {
-                        formattedTime = new Date(order.time).toLocaleString();
-                    }
-                } catch (e) {
-                    formattedTime = 'Time not specified';
-                }
             }
 
-            // Status badge
-            const statusBadge = document.createElement('div');
-            statusBadge.className = `status-badge status-${order.status || 'pending'}`;
-            statusBadge.textContent = order.status || 'pending';
-            card.appendChild(statusBadge);
-            
-            // Order header with number
-            const orderHeader = document.createElement('div');
-            orderHeader.className = 'order-header';
-            
-            const orderNum = document.createElement('div');
-            orderNum.className = 'order-number';
-            orderNum.textContent = orderNumber;
-            orderHeader.appendChild(orderNum);
-            
-            const orderTitle = document.createElement('h3');
-            orderTitle.textContent = `Order #${orderNumber}`;
-            orderHeader.appendChild(orderTitle);
-            
-            card.appendChild(orderHeader);
-            
-            // Customer info
-            const customerInfo = document.createElement('div');
-            customerInfo.className = 'customer-info';
-            
-            const customerName = document.createElement('div');
-            customerName.className = 'customer-name';
-            customerName.textContent = order.name;
-            customerInfo.appendChild(customerName);
-            
-            const customerPhone = document.createElement('div');
-            customerPhone.textContent = `Phone: ${order.mobile}`;
-            customerInfo.appendChild(customerPhone);
-            
-            // Contact buttons
-            const contactButtons = document.createElement('div');
-            contactButtons.className = 'contact-buttons';
-            
-            const callBtn = document.createElement('button');
-            callBtn.className = 'contact-btn call-btn';
-            callBtn.innerHTML = '📞 Call';
-            callBtn.onclick = () => window.open(`tel:${order.mobile}`, '_blank');
-            contactButtons.appendChild(callBtn);
-            
-            const whatsappBtn = document.createElement('button');
-            whatsappBtn.className = 'contact-btn whatsapp-btn';
-            whatsappBtn.innerHTML = '💬 WhatsApp';
-
-            
-            // Updated WhatsApp button functionality
-            whatsappBtn.onclick = () => {
-                const orderDetailsText = order.items.map(i => `${i.name} x${i.quantity} = ₹${i.total}`).join("\n");
-                const message = `Hello ${order.name},\nYour order details:\n${orderDetailsText}\n\nTotal: ₹${order.grandTotal}\n\nNow your order is being prepared. You can track your order here: https://zoomkart.store/track.html\n\nThank you for using our services 💝\nTeam Zoomkart`;
-                const whatsappUrl = `https://wa.me/91${order.mobile}?text=${encodeURIComponent(message)}`;
-                window.open(whatsappUrl, '_blank');
-            };
-            
-            contactButtons.appendChild(whatsappBtn);
-            
-            customerInfo.appendChild(contactButtons);
-            card.appendChild(customerInfo);
-            
-            // Order items
-            const orderItems = document.createElement('div');
-            orderItems.className = 'order-items';
-            
-            if (order.items && order.items.length > 0) {
-                order.items.forEach(item => {
-                    const itemDiv = document.createElement('div');
-                    itemDiv.className = 'order-item';
-                    
-                    const itemName = document.createElement('div');
-                    itemName.textContent = `${item.name} x${item.quantity}`;
-                    itemDiv.appendChild(itemName);
-                    
-                    const itemPrice = document.createElement('div');
-                    itemPrice.textContent = `₹${item.total}`;
-                    itemDiv.appendChild(itemPrice);
-                    
-                    orderItems.appendChild(itemDiv);
-                });
-            } else {
-                const noItems = document.createElement('div');
-                noItems.textContent = 'No items found';
-                noItems.style.color = '#999';
-                noItems.style.fontStyle = 'italic';
-                orderItems.appendChild(noItems);
-            }
-            
-            card.appendChild(orderItems);
-            
-              // Order summary
-            const orderSummary = docum            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        
-        .call-btn {
-            background-color: #4CAF50;
-        }
-        
-        .whatsapp-btn {
-            background-color: #25D366;
-        }
-        
-        .order-items {
-            margin: 15px 0;
-        }
-        
-        .order-item {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 8px;
-            padding-bottom: 8px;
-            border-bottom: 1px dashed #eee;
-        }
-        
-        .order-summary {
-            margin-top: 15px;
-            padding-top: 10px;
-            border-top: 1px solid #eee;
-        }
-        
-        .summary-row {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 5px;
-        }
-        
-        .total-row {
-            font-weight: bold;
-            font-size: 18px;
-            color: var(--primary);
-        }
-        
-        .order-footer {
-            margin-top: 15px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding-top: 10px;
-            border-top: 1px solid #eee;
-        }
-        
-        .order-time {
-            font-size: 14px;
-            color: #666;
-        }
-        
-        .action-buttons {
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-        }
-        
-        .map-btn {
-            background-color: var(--dark);
-        }
-        
-        .payment-btn {
-            background-color: var(--payment);
-        }
-        
-        .status-badge {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            color: white;
-            padding: 5px 10px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: bold;
-        }
-        
-        .status-pending {
-            background-color: var(--pending);
-        }
-        
-        .status-completed {
-            background-color: var(--completed);
-        }
-        
-        .status-cancelled {
-            background-color: var(--cancelled);
-        }
-        
-        /* Payment Modal Styles */
-        .modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0,0,0,0.7);
-            z-index: 1000;
-            justify-content: center;
-            align-items: center;
-        }
-        
-        .modal-content {
-            background-color: white;
-            padding: 25px;
-            border-radius: 10px;
-            width: 90%;
-            max-width: 400px;
-            text-align: center;
-            position: relative;
-        }
-        
-        .close-modal {
-            position: absolute;
-            top: 10px;
-            right: 15px;
-            font-size: 24px;
-            cursor: pointer;
-            color: #666;
-        }
-        
-        .qr-code {
-            margin: 20px auto;
-            width: 200px;
-            height: 200px;
-            border: 1px solid #eee;
-            padding: 10px;
-            background-color: white;
-        }
-        
-        .payment-timer {
-            font-size: 24px;
-            font-weight: bold;
-            color: var(--primary);
-            margin: 15px 0;
-        }
-        
-        .payment-link {
-            margin-top: 15px;
-            word-break: break-all;
-            color: var(--payment);
-            text-decoration: none;
-            display: inline-block;
-            padding: 8px 12px;
-            background-color: #f5f5f5;
-            border-radius: 5px;
-        }
-        
-        .copy-btn {
-            background-color: var(--dark);
-            color: white;
-            border: none;
-            padding: 8px 15px;
-            border-radius: 5px;
-            cursor: pointer;
-            margin-top: 10px;
-            font-size: 14px;
-        }
-        
-        @media (max-width: 768px) {
-            .orders-container {
-                grid-template-columns: 1fr;
-            }
-            
-            .action-buttons {
-                flex-direction: column;
-                width: 100%;
-            }
-            
-            .order-footer {
-                flex-direction: column;
-                gap: 15px;
-            }
-            
-            .order-time {
-                width: 100%;
-                text-align: center;
-            }
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Food Delivery Order Management</h1>
-        
-        <div class="input-section">
-            <h2>New Order</h2>
-            <textarea id="orderInput" placeholder="Paste order message here..."></textarea>
-            <button id="generateBtn">Generate Card</button>
-        </div>
-        
-        <div class="orders-container" id="ordersContainer">
-            <!-- Orders will be displayed here -->
-        </div>
-    </div>
-
-    <!-- Payment Modal -->
-    <div class="modal" id="paymentModal">
-        <div class="modal-content">
-            <span class="close-modal">&times;</span>
-            <h2>Payment Request</h2>
-            <p>Scan QR code or click payment link</p>
-            
-            <div class="qr-code" id="qrCode"></div>
-            
-            <div class="payment-timer" id="paymentTimer">05:00</div>
-            
-            <a href="#" class="payment-link" id="paymentLink" target="_blank"></a>
-            
-            <button class="copy-btn" id="copyBtn">Copy Payment Link</button>
-        </div>
-    </div>
-
-    <script>
-        // Firebase configuration
-        const firebaseConfig = {
-            apiKey: "AIzaSyA1irPLEM3r7u7V_ym3VA5ynWlYWl0C-JM",
-            authDomain: "foodu-94983.firebaseapp.com",
-            projectId: "foodu-94983",
-            storageBucket: "foodu-94983.appspot.com",
-            messagingSenderId: "872411238136",
-            appId: "1:872411238136:web:93b4568609ecc5bf99b50d"
-        };
-
-        // Initialize Firebase
-        const app = firebase.initializeApp(firebaseConfig);
-        const db = firebase.firestore();
-
-        // DOM elements
-        const orderInput = document.getElementById('orderInput');
-        const generateBtn = document.getElementById('generateBtn');
-        const ordersContainer = document.getElementById('ordersContainer');
-        const paymentModal = document.getElementById('paymentModal');
-        const qrCodeElement = document.getElementById('qrCode');
-        const paymentLink = document.getElementById('paymentLink');
-        const copyBtn = document.getElementById('copyBtn');
-        const paymentTimer = document.getElementById('paymentTimer');
-        const closeModal = document.querySelector('.close-modal');
-
-        // Global order counter
-        let orderCounter = 0;
-        let paymentTimerInterval;
-        // Custom Date Parser (DD/MM/YYYY, HH:MM:SS)
-function parseCustomDate(dateStr) {
-    // Format: 19/08/2025, 12:23:16
-    const match = dateStr.match(/(\d{2})\/(\d{2})\/(\d{4}),\s*(\d{2}):(\d{2}):(\d{2})/);
-    if (match) {
-        const [, day, month, year, hours, minutes, seconds] = match;
-        return new Date(
-            parseInt(year),
-            parseInt(month) - 1, // Month 0-based
-            parseInt(day),
-            parseInt(hours),
-            parseInt(minutes),
-            parseInt(seconds)
-        );
-    }
-    return new Date(); // fallback
-}
-
-        // Validate order message format
-        function validateOrderMessage(message) {
-            const requiredFields = ['Name:', 'Mobile:', 'Items:', 'Location:'];
-            return requiredFields.every(field => message.includes(field));
-        }
-
-        // Parse order message
-        function parseOrderMessage(message) {
-            if (!message) return null;
-            
-            if (!validateOrderMessage(message)) {
-                throw new Error('Invalid order format. Missing required fields.');
-            }
-            
-            try {
-                const timeString = extractValue(message, 'Time:');
-                const order = {
-                    name: extractValue(message, 'Name:') || 'No Name',
-                    mobile: extractValue(message, 'Mobile:') || 'No Phone',
-                    items: extractItems(message),
-                    subtotal: extractValue(message, 'Subtotal:') || '0',
-                    deliveryCharge: extractValue(message, 'Delivery Charge:') || '0',
-                    grandTotal: extractValue(message, 'Grand Total:') || '0',
-                    location: extractValue(message, 'Location:') || 'No Location',
-                    time: timeString ? parseCustomDate(timeString) : new Date(),
-                    status: 'pending',
-                    paymentRequested: false
-                };
-                return order;
-            } catch (error) {
-                console.error('Error parsing order:', error);
-                throw error;
-            }
-        }
-
-        function extractValue(text, key) {
-            if (!text || !key) return '';
-            const regex = new RegExp(`${key}\\s*(.*)`);
-            const match = text.match(regex);
-            return match ? match[1].split('\n')[0].trim() : '';
-        }
-
-        function extractItems(text) {
-            try {
-                const itemsMatch = text.match(/Items:\n([\s\S]*?)(?:\nTotal Items:|\nSubtotal:|$)/i);
-                if (!itemsMatch) return [];
-                
-                const itemsText = itemsMatch[1];
-                const itemLines = itemsText.split('\n').filter(line => line.trim().startsWith('-'));
-                
-                return itemLines.map(line => {
-                    // Updated pattern to match your format
-                    const pattern = /-\s*(.*?)\s*x\s*(\d+)\s*=\s*₹?([\d.]+)/;
-                    const match = line.match(pattern);
-                    
-                    if (match) {
-                        return {
-                            name: (match[1] || 'Item').trim(),
-                            price: (match[3] || '0').trim(), // Price per item
-                            quantity: (match[2] || '1').trim(),
-                            total: (match[3] || '0').trim() // Total for quantity
-                        };
-                    }
-                    
-                    return {
-                        name: line.replace('-', '').trim(),
-                        price: '0',
-                        quantity: '1',
-                        total: '0'
-                    };
-                });
-            } catch (error) {
-                console.error('Error extracting items:', error);
-                return [];
-            }
-        }
-
-        // Create order card
-        function createOrderCard(order, orderNumber) {
-            const card = document.createElement('div');
-            card.className = 'order-card';
-            card.id = `order-${orderNumber}`;
-            
-            // Format time
-            let formattedTime = '';
-            if (order.time) {
-                try {
-                    if (typeof order.time.toDate === 'function') {
-                        formattedTime = order.time.toDate().toLocaleString();
-                    } else if (order.time.seconds) {
-                        formattedTime = new Date(order.time.seconds * 1000).toLocaleString();
-                    } else {
-                        formattedTime = new Date(order.time).toLocaleString();
-                    }
-                } catch (e) {
-                    formattedTime = 'Time not specified';
-                }
-            }
-
-            // Status badge
-            const statusBadge = document.createElement('div');
-            statusBadge.className = `status-badge status-${order.status || 'pending'}`;
-            statusBadge.textContent = order.status || 'pending';
-            card.appendChild(statusBadge);
-            
-            // Order header with number
-            const orderHeader = document.createElement('div');
-            orderHeader.className = 'order-header';
-            
-            const orderNum = document.createElement('div');
-            orderNum.className = 'order-number';
-            orderNum.textContent = orderNumber;
-            orderHeader.appendChild(orderNum);
-            
-            const orderTitle = document.createElement('h3');
-            orderTitle.textContent = `Order #${orderNumber}`;
-            orderHeader.appendChild(orderTitle);
-            
-            card.appendChild(orderHeader);
-            
-            // Customer info
-            const customerInfo = document.createElement('div');
-            customerInfo.className = 'customer-info';
-            
-            const customerName = document.createElement('div');
-            customerName.className = 'customer-name';
-            customerName.textContent = order.name;
-            customerInfo.appendChild(customerName);
-            
-            const customerPhone = document.createElement('div');
-            customerPhone.textContent = `Phone: ${order.mobile}`;
-            customerInfo.appendChild(customerPhone);
-            
-            // Contact buttons
-            const contactButtons = document.createElement('div');
-            contactButtons.className = 'contact-buttons';
-            
-            const callBtn = document.createElement('button');
-            callBtn.className = 'contact-btn call-btn';
-            callBtn.innerHTML = '📞 Call';
-            callBtn.onclick = () => window.open(`tel:${order.mobile}`, '_blank');
-            contactButtons.appendChild(callBtn);
-            
-            const whatsappBtn = document.createElement('button');
-            whatsappBtn.className = 'contact-btn whatsapp-btn';
-            whatsappBtn.innerHTML = '💬 WhatsApp';
-            whatsappBtn.onclick = () => window.open(`https://wa.me/91${order.mobile}?text=Hi ${order.name}, Regarding your order #${orderNumber}`, '_blank');
-            contactButtons.appendChild(whatsappBtn);
-            
-            customerInfo.appendChild(contactButtons);
-            card.appendChild(customerInfo);
-            
-            // Order items
-            const orderItems = document.createElement('div');
-            orderItems.className = 'order-items';
-            
-            if (order.items && order.items.length > 0) {
-                order.items.forEach(item => {
-                    const itemDiv = document.createElement('div');
-                    itemDiv.className = 'order-item';
-                    
-                    const itemName = document.createElement('div');
-                    itemName.textContent = `${item.name} x${item.quantity}`;
-                    itemDiv.appendChild(itemName);
-                    
-                    const itemPrice = document.createElement('div');
-                    itemPrice.textContent = `₹${item.total}`;
-                    itemDiv.appendChild(itemPrice);
-                    
-                    orderItems.appendChild(itemDiv);
-                });
-            } else {
-                const noItems = document.createElement('div');
-                noItems.textContent = 'No items found';
-                noItems.style.color = '#999';
-                noItems.style.fontStyle = 'italic';
-                orderItems.appendChild(noItems);
-            }
-            
-            card.appendChild(orderItems);
-            
-            // Order summary
-            const orderSummary = document.createElement('div');
-            orderSummary.className = 'order-summary';
-            
-            const subtotalRow = document.createElement('div');
-            subtotalRow.className = 'summary-row';
-            subtotalRow.innerHTML = '<div>Subtotal:</div><div>₹' + (order.subtotal || '0') + '</div>';
-            orderSummary.appendChild(subtotalRow);
-            
-            const deliveryRow = document.createElement('div');
-            deliveryRow.className = 'summary-row';
-            deliveryRow.innerHTML = '<div>Delivery Charge:</div><div>₹' + (order.deliveryCharge || '0') + '</div>';
-            orderSummary.appendChild(deliveryRow);
-            
-            const totalRow = document.createElement('div');
-            totalRow.className = 'summary-row total-row';
-            totalRow.innerHTML = '<div>Total:</div><div>₹' + (order.grandTotal || '0') + '</div>';
-            orderSummary.appendChild(totalRow);
-            
-            card.appendChild(orderSummary);
-            
-            // Order footer
-            const orderFooter = document.createElement('div');
-            orderFooter.className = 'order-footer';
-            
-            const orderTime = document.createElement('div');
-            orderTime.className = 'order-time';
-            orderTime.textContent = formattedTime || 'Time not specified';
-            orderFooter.appendChild(orderTime);
-            
-            const actionButtons = document.createElement('div');
-            actionButtons.className = 'action-buttons';
-            
-            // Payment button
-            const paymentBtn = document.createElement('button');
-            paymentBtn.className = 'payment-btn';
-            paymentBtn.innerHTML = '💳 Request Payment';
-            paymentBtn.onclick = () => initiatePayment(order, orderNumber);
-            actionButtons.appendChild(paymentBtn);
-            
-            // Map button
-            const mapBtn = document.createElement('button');
-            mapBtn.className = 'map-btn';
-            mapBtn.textContent = '🗺️ View Location';
-            mapBtn.onclick = () => window.open(`https://www.google.com/maps?q=${order.location}`, '_blank');
-            actionButtons.appendChild(mapBtn);
-            
-            orderFooter.appendChild(actionButtons);
-            card.appendChild(orderFooter);
-            
-            return card;
-        }
-
-        // Payment functions
-        function initiatePayment(order, orderNumber) {
-            // Generate UPI payment link
-            const amount = order.grandTotal ? order.grandTotal.replace('₹', '').trim() : '0';
-            const upiLink = `upi://pay?pa=9306018924@axl&pn=Jatin%20%20.&mc=0000&mode=02&purpose=00&am=${amount}&cu=INR`;
-            
-            // Show modal with QR code and payment link
-            showPaymentModal(upiLink, amount);
-            
-            // Update order in Firestore
-            db.collection('orders').doc(`order-${orderNumber}`).update({
-                paymentRequested: true
-            });
-        }
-
-        function showPaymentModal(upiLink, amount) {
-            // Clear old QR code
-            qrCodeElement.innerHTML = "";
-
-            // Generate QR code and append
-            QRCode.toCanvas(document.createElement("canvas"), upiLink, { width: 200 }, (error, canvas) => {
-                if (error) {
-                    console.error('QR code generation error:', error);
+            // Event listeners
+            generateBtn.addEventListener('click', async () => {
+                const message = orderInput.value.trim();
+                if (!message) {
+                    alert('Please paste an order message first');
                     return;
                 }
-                qrCodeElement.appendChild(canvas);
-            });
-            
-            // Set payment link
-            paymentLink.href = upiLink;
-            paymentLink.textContent = `Pay ₹${amount}`;
-            
-            // Start timer display
-            startPaymentTimer();
-            
-            // Show modal
-            paymentModal.style.display = 'flex';
-        }
-
-        function startPaymentTimer() {
-            let timeLeft = 300; // 5 minutes in seconds
-            
-            clearInterval(paymentTimerInterval);
-            
-            paymentTimerInterval = setInterval(() => {
-                timeLeft--;
                 
-                const minutes = Math.floor(timeLeft / 60);
-                const seconds = timeLeft % 60;
-                
-                paymentTimer.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-                
-                if (timeLeft <= 0) {
-                    clearInterval(paymentTimerInterval);
-                    paymentTimer.textContent = "Time expired!";
+                try {
+                    const order = parseOrderMessage(message);
+                    orderCounter++;
+                    order.orderNumber = orderCounter;
+                    
+                    const docId = await saveOrderToFirestore(order);
+                    
+                    const card = createOrderCard(order, orderCounter, docId);
+                    ordersContainer.prepend(card);
+                    orderInput.value = '';
+                } catch (error) {
+                    console.error('Error processing order:', error);
+                    alert(`Failed to process order: ${error.message}`);
+                    if (orderCounter > 0) orderCounter--; // Rollback counter if failed
                 }
-            }, 1000);
-        }
-
-        // Save order to Firestore
-        function saveOrderToFirestore(order, orderNumber) {
-            return db.collection('orders').doc(`order-${orderNumber}`).set({
-                ...order,
-                orderNumber
             });
-        }
 
-        // Load orders from Firestore
-        function loadOrdersFromFirestore() {
-            ordersContainer.innerHTML = '';
-            
-            db.collection('orders').orderBy('time', 'desc').get().then((querySnapshot) => {
-                querySnapshot.forEach((doc) => {
-                    const orderData = doc.data();
-                    const orderNumber = orderData.orderNumber;
-                    
-                    // Update global counter if needed
-                    if (orderNumber > orderCounter) {
-                        orderCounter = orderNumber;
-                    }
-                    
-                    // Convert Firestore Timestamp to Date if needed
-                    if (orderData.time && typeof orderData.time.toDate === 'function') {
-                        orderData.time = orderData.time.toDate();
-                    }
-                    
-                    const card = createOrderCard(orderData, orderNumber);
-ordersContainer.prepend(card);
-                });
-            }).catch(error => {
-                console.error('Error loading orders:', error);
-            });
-        }
-
-        // Event listeners
-        generateBtn.addEventListener('click', async () => {
-            const message = orderInput.value.trim();
-            if (!message) {
-                alert('Please paste an order message first');
-                return;
-            }
-            
-            try {
-                const order = parseOrderMessage(message);
-                orderCounter++;
-                await saveOrderToFirestore(order, orderCounter);
-                
-                const card = createOrderCard(order, orderCounter);
-                ordersContainer.prepend(card);
-                orderInput.value = '';
-            } catch (error) {
-                console.error('Error processing order:', error);
-                alert(`Failed to process order: ${error.message}`);
-                if (orderCounter > 0) orderCounter--; // Rollback counter if failed
-            }
-        });
-
-        closeModal.addEventListener('click', () => {
-            paymentModal.style.display = 'none';
-            clearInterval(paymentTimerInterval);
-        });
-
-        copyBtn.addEventListener('click', () => {
-            navigator.clipboard.writeText(paymentLink.href).then(() => {
-                copyBtn.textContent = 'Copied!';
-                setTimeout(() => {
-                    copyBtn.textContent = 'Copy Payment Link';
-                }, 2000);
-            });
-        });
-
-        // Close modal when clicking outside
-        window.addEventListener('click', (event) => {
-            if (event.target === paymentModal) {
+            closeModal.addEventListener('click', () => {
                 paymentModal.style.display = 'none';
                 clearInterval(paymentTimerInterval);
-            }
-        });
+            });
 
-        // Initialize the app
-        document.addEventListener('DOMContentLoaded', () => {
+            copyBtn.addEventListener('click', () => {
+                navigator.clipboard.writeText(paymentLink.href).then(() => {
+                    copyBtn.textContent = 'Copied!';
+                    setTimeout(() => {
+                        copyBtn.textContent = 'Copy Payment Link';
+                    }, 2000);
+                });
+            });
+
+            // Close modal when clicking outside
+            window.addEventListener('click', (event) => {
+                if (event.target === paymentModal) {
+                    paymentModal.style.display = 'none';
+                    clearInterval(paymentTimerInterval);
+                }
+            });
+
+            // Initialize the app
             loadOrdersFromFirestore();
-        });
+        }
     </script>
 </body>
 </html>
